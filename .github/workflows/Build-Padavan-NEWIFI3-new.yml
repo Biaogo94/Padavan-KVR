@@ -54,18 +54,20 @@ jobs:
           set_config CONFIG_FIRMWARE_INCLUDE_V2RAY n
           set_config CONFIG_FIRMWARE_INCLUDE_XRAY n
           set_config CONFIG_FIRMWARE_INCLUDE_TROJAN n
+          
+          # FIX: Disable the msd_lite component causing the build failure
+          set_config CONFIG_FIRMWARE_INCLUDE_MSD_LITE n
+
           echo "--- Firmware Configuration Complete ---"
           EOF
           chmod +x .github/scripts/configure_firmware.sh
 
-      # 注意：我们不再缓存 toolchain 目录，因为它被安装到了根目录 /toolchain-3.4.x
-      # 我们只缓存 apt 包来加速
       - name: Cache APT packages
         id: cache-apt
         uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-packages-${{ hashFiles('**/build.yml') }} # key 变动时会重新缓存
+          key: ${{ runner.os }}-apt-packages-${{ hashFiles('**/build.yml') }}
 
       - name: Install dependencies
         env:
@@ -85,7 +87,6 @@ jobs:
       - name: Download MIPS toolchain
         working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
         run: |
-          # 修正: 必须使用 sudo 来允许脚本在根目录创建 /toolchain-3.4.x
           sudo ./dl_toolchain.sh
 
       - name: Build Firmware
@@ -97,14 +98,12 @@ jobs:
           fi
           cp -f "configs/templates/${CONFIG_TARGET}.config" .config
           ../../.github/scripts/configure_firmware.sh .config
-          # 修正: 编译脚本需要 sudo 权限
           sudo ./clear_tree
           sudo ./build_firmware_modify $CONFIG_TARGET 0
 
       - name: Prepare artifact for upload
         run: |
           mkdir -p artifacts
-          # 文件路径现在在工作目录下的 rt-n56u/trunk/images/
           cp ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
           cd artifacts
           mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
