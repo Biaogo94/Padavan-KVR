@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
 
     env:
@@ -16,12 +16,6 @@ jobs:
       KERNEL_VERSION: 3.4
 
     steps:
-      - name: Download MIPS toolchain
-        working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
-        run: |
-          sudo ./dl_toolchain.sh
-          sudo chown -R $USER:$USER ../toolchain-3.4.x
-          
       - name: Checkout repository
         uses: actions/checkout@v4
         
