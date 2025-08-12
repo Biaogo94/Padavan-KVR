@@ -19,6 +19,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download MIPS toolchain
+        working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
+        run: |
+          sudo ./dl_toolchain.sh
+          sudo chown -R $USER:$USER ../toolchain-3.4.x
+
       - name: Prepare build environment
         run: |
           mkdir -p .github/scripts
