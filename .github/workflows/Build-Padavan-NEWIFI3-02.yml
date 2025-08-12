@@ -1,0 +1,150 @@
+name: Build-Padavan-NEWIFI3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04 # OPTIMIZATION: Use a more recent runner
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    # OPTIMIZATION: Define shared environment variables at the job level
+    env:
+      REPO_URL: https://github.com/fightroad/Padavan-KVR.git
+      REPO_BRANCH: master
+      FIRMWARE_PATH: rt-n56u
+      CONFIG_TARGET: NEWIFI3
+      KERNEL_VERSION: 3.4
+
+    steps:
+      - name: Checkout repository
+        # OPTIMIZATION: Use a specific, stable version of the action
+        uses: actions/checkout@v4
+
+      - name: Prepare build environment
+        run: |
+          # Create a directory for our build scripts if it doesn't exist
+          mkdir -p .github/scripts
+
+      # OPTIMIZATION: Create a dedicated configuration script for maintainability
+      - name: Create firmware configuration script
+        id: create_config_script
+        run: |
+          cat <<'EOF' > .github/scripts/configure_firmware.sh
+          #!/bin/bash
+          set -e # Exit immediately if a command exits with a non-zero status.
+
+          CONFIG_FILE="$1"
+          
+          # Function to set a config value.
+          # Usage: set_config CONFIG_KEY y/n
+          set_config() {
+              local KEY=$1
+              local VALUE=$2
+              # If the line exists, modify it. If not, add it.
+              if grep -q "^#*$KEY" "$CONFIG_FILE"; then
+                  sed -i "s|^#*$KEY=.*|$KEY=$VALUE|" "$CONFIG_FILE"
+              else
+                  echo "$KEY=$VALUE" >> "$CONFIG_FILE"
+              fi
+          }
+
+          echo "--- Starting Firmware Configuration ---"
+          
+          # Reset/Disable specific options from the template
+          set_config CONFIG_FIRMWARE_INCLUDE_DNSFORWARDER n
+          set_config CONFIG_FIRMWARE_INCLUDE_MENTOHUST n
+          set_config CONFIG_FIRMWARE_INCLUDE_SCUTCLIENT n
+          set_config CONFIG_FIRMWARE_INCLUDE_SRELAY n
+          set_config CONFIG_FIRMWARE_INCLUDE_NJIT_CLIENT n
+
+          # Enable/Disable desired features
+          set_config CONFIG_FIRMWARE_INCLUDE_OPENSSL_EXE y
+          set_config CONFIG_FIRMWARE_INCLUDE_ZEROTIER y
+          set_config CONFIG_FIRMWARE_INCLUDE_FRPC y
+          set_config CONFIG_FIRMWARE_INCLUDE_ALIDDNS y
+          
+          # Explicitly disable other features to ensure a clean config
+          set_config CONFIG_FIRMWARE_INCLUDE_TRANSMISSION n
+          set_config CONFIG_FIRMWARE_INCLUDE_ARIA n
+          set_config CONFIG_FIRMWARE_INCLUDE_SHADOWSOCKS n
+          set_config CONFIG_FIRMWARE_INCLUDE_V2RAY n
+          set_config CONFIG_FIRMWARE_INCLUDE_XRAY n
+          set_config CONFIG_FIRMWARE_INCLUDE_TROJAN n
+
+          echo "--- Firmware Configuration Complete ---"
+          EOF
+          chmod +x .github/scripts/configure_firmware.sh
+
+      - name: Cache toolchain and dependencies
+        # OPTIMIZATION: Cache toolchain and apt packages to speed up builds
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.FIRMWARE_PATH }}/toolchain-mipsel
+            /var/cache/apt/archives
+          key: ${{ runner.os }}-toolchain-${{ hashFiles('.github/scripts/configure_firmware.sh') }}
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install \
+            unzip libtool-bin curl cmake gperf gawk flex bison nano xxd \
+            fakeroot cpio git python3-docutils gettext automake autopoint \
+            texinfo build-essential help2man pkg-config zlib1g-dev \
+            libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget
+        # Note: python-docutils is for Python 2. On ubuntu-22.04, python3-docutils is used.
+
+      - name: Clone Padavan source code
+        run: |
+          # OPTIMIZATION: Clone into the workspace, not /opt
+          git clone --depth=1 -b $REPO_BRANCH $REPO_URL $FIRMWARE_PATH
+
+      - name: Download MIPS toolchain
+        # OPTIMIZATION: Only run this if the cache was not restored
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
+        run: |
+          ./dl_toolchain.sh
+
+      - name: Build Firmware
+        working-directory: ./${{ env.FIRMWARE_PATH }}/trunk
+        run: |
+          # Check if template exists
+          if [ ! -f "configs/templates/${CONFIG_TARGET}.config" ]; then
+            echo "Error: Template configs/templates/${CONFIG_TARGET}.config not found!"
+            exit 1
+          fi
+
+          # Copy base template
+          cp -f "configs/templates/${CONFIG_TARGET}.config" .config
+          
+          # Apply customizations using our clean script
+          # The script is located in the root of the workspace
+          ../../.github/scripts/configure_firmware.sh .config
+
+          # Build the firmware
+          # OPTIMIZATION: No sudo needed as we are in the workspace
+          ./clear_tree
+          ./build_firmware_modify $CONFIG_TARGET 0
+
+      - name: Prepare artifact for upload
+        run: |
+          # OPTIMIZATION: Create an artifact directory in the workspace
+          mkdir -p artifacts
+          cp -f ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
+          cd artifacts
+          # Add build date to filename for easier identification
+          sudo mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
+
+      - name: Upload firmware artifact
+        # OPTIMIZATION: Use a specific, stable version of the action
+        uses: actions/upload-artifact@v4
+        if: always() # Upload even if the build fails, for debugging
+        with:
+          name: Padavan-Firmware-${{ env.CONFIG_TARGET }}
+          path: artifacts
+
