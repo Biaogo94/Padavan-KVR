@@ -60,11 +60,44 @@ jobs:
           EOF
           chmod +x .github/scripts/configure_firmware.sh
 
-      - name: Cache APT packages
-        id: cache-apt
+      # 1. 还原 apt 缓存
+      - name: Restore APT cache
+        id: restore-apt-cache
         uses: actions/cache@v4
         with:
-          path: /var/cache/apt/archives
+          path: ./aptcache
+          key: ${{ runner.os }}-apt-packages-${{ hashFiles('**/build.yml') }}
+
+      # 2. 还原后，将缓存内容拷贝回 APT 实际位置（如有缓存才还原）
+      - name: Pre-fill /var/cache/apt/archives from cache (if any)
+        if: steps.restore-apt-cache.outputs.cache-hit == 'true'
+        run: |
+          sudo cp -rf ./aptcache/* /var/cache/apt/archives/ || true
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install \
+            unzip libtool-bin curl cmake gperf gawk flex bison nano xxd \
+            fakeroot cpio git python3-docutils gettext automake autopoint \
+            texinfo build-essential help2man pkg-config zlib1g-dev \
+            libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget
+
+      # 4. 复制可缓存文件
+      - name: Copy APT cache safely for future cache
+        run: |
+          mkdir -p ./aptcache
+          sudo find /var/cache/apt/archives -maxdepth 1 -type f -exec cp {} ./aptcache/ \;
+          sudo chown -R $USER:$USER ./aptcache
+
+      # 5. 缓存
+      - name: Save APT packages cache
+        uses: actions/cache/save@v4
+        with:
+          path: ./aptcache
           key: ${{ runner.os }}-apt-packages-${{ hashFiles('**/build.yml') }}
 
       - name: Install dependencies
