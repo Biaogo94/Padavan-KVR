@@ -12,8 +12,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    # 可选：缓存 apt，加快安装依赖
     - name: Cache apt packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: /var/cache/apt
         key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/*.yml') }}
@@ -27,11 +28,12 @@ jobs:
           cpio git python3-docutils gettext automake autopoint texinfo build-essential help2man \
           pkg-config zlib1g-dev libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget
 
+    # 缓存工具链避免重复下载
     - name: Cache toolchain
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: /opt/rt-n56u/toolchain-mipsel
-        key: padavan-toolchain-${{ runner.os }}-${{ hashFiles('toolchain.hash') }}
+        key: padavan-toolchain-${{ runner.os }}-${{ hashFiles('toolchain.hash', '.github/workflows/*.yml') }}
         restore-keys: |
           padavan-toolchain-
 
@@ -48,14 +50,26 @@ jobs:
       run: |
         cd /opt/rt-n56u/trunk
         if [ ! -f configs/templates/$TNAME.config ]; then
-          echo "Config template not found"
+          echo "Config template not found!"
           exit 1
         fi
+        
         cp configs/templates/$TNAME.config .config
-        # 覆盖自定义配置（建议将 custom.config 放在仓库）
-        if [ -f $GITHUB_WORKSPACE/custom.config ]; then
-          cp $GITHUB_WORKSPACE/custom.config .config
-        fi
+        
+        # 删除冲突或不必要的功能（避免老工具链不兼容）
+        sed -i '/CONFIG_FIRMWARE_INCLUDE_MSD_LITE/d' .config
+        echo "CONFIG_FIRMWARE_INCLUDE_MSD_LITE=n" >> .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_DNSFORWARDER=y/CONFIG_FIRMWARE_INCLUDE_DNSFORWARDER=n/g' .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_MENTOHUST=y/CONFIG_FIRMWARE_INCLUDE_MENTOHUST=n/g' .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_SCUTCLIENT=y/CONFIG_FIRMWARE_INCLUDE_SCUTCLIENT=n/g' .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_SRELAY=y/CONFIG_FIRMWARE_INCLUDE_SRELAY=n/g' .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_NJIT_CLIENT=y/CONFIG_FIRMWARE_INCLUDE_NJIT_CLIENT=n/g' .config
+        sed -i 's/CONFIG_FIRMWARE_INCLUDE_OPENSSL_EXE=n/CONFIG_FIRMWARE_INCLUDE_OPENSSL_EXE=y/g' .config
+        
+        # 添加需要的功能
+        echo "CONFIG_FIRMWARE_INCLUDE_ZEROTIER=y" >> .config
+        echo "CONFIG_FIRMWARE_INCLUDE_FRPC=y" >> .config
+        echo "CONFIG_FIRMWARE_INCLUDE_ALIDDNS=y" >> .config
 
     - name: Build firmware
       env:
