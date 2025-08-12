@@ -1,4 +1,4 @@
-name: Build-Padavan-NEWIFI3-new
+name: Build-Padavan-NEWIFI3-Gemini
 
 on:
   workflow_dispatch:
@@ -39,6 +39,8 @@ jobs:
               fi
           }
           echo "--- Starting Firmware Configuration ---"
+          # Set your desired features here.
+          # The problematic packages will be physically removed later.
           set_config CONFIG_FIRMWARE_INCLUDE_DNSFORWARDER n
           set_config CONFIG_FIRMWARE_INCLUDE_MENTOHUST n
           set_config CONFIG_FIRMWARE_INCLUDE_SCUTCLIENT n
@@ -54,15 +56,6 @@ jobs:
           set_config CONFIG_FIRMWARE_INCLUDE_V2RAY n
           set_config CONFIG_FIRMWARE_INCLUDE_XRAY n
           set_config CONFIG_FIRMWARE_INCLUDE_TROJAN n
-          
-          # FIX: Disable the msd_lite component
-          set_config CONFIG_FIRMWARE_INCLUDE_MSD_LITE n
-
-          # FIX: Aggressively disable the broken e2fsprogs package and its dependencies
-          set_config CONFIG_FIRMWARE_INCLUDE_E2FSPROGS n
-          set_config CONFIG_FIRMWARE_INCLUDE_FSCK n
-          set_config CONFIG_FIRMWARE_INCLUDE_TUNE2FS n
-
           echo "--- Firmware Configuration Complete ---"
           EOF
           chmod +x .github/scripts/configure_firmware.sh
@@ -94,24 +87,46 @@ jobs:
         run: |
           sudo ./dl_toolchain.sh
 
+      # 这是关键的修正步骤
+      - name: Forcefully Remove Problematic Packages
+        run: |
+          echo "Removing broken packages that ignore configuration and fail to build..."
+          sudo rm -rf ./${{ env.FIRMWARE_PATH }}/trunk/user/e2fsprogs
+          sudo rm -rf ./${{ env.FIRMWARE_PATH }}/trunk/user/msd_lite
+          echo "Problematic packages removed."
+
       - name: Build Firmware
         working-directory: ./${{ env.FIRMWARE_PATH }}/trunk
         run: |
+          # Check for config template
           if [ ! -f "configs/templates/${CONFIG_TARGET}.config" ]; then
             echo "Error: Template configs/templates/${CONFIG_TARGET}.config not found!"
             exit 1
           fi
+          # Copy base template and apply our customizations
           cp -f "configs/templates/${CONFIG_TARGET}.config" .config
           ../../.github/scripts/configure_firmware.sh .config
+
+          # Now build the firmware
           sudo ./clear_tree
           sudo ./build_firmware_modify $CONFIG_TARGET 0
 
       - name: Prepare artifact for upload
         run: |
           mkdir -p artifacts
-          cp ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
-          cd artifacts
-          mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
+          # Ensure the images directory exists before copying
+          if [ -d "./${{ env.FIRMWARE_PATH }}/trunk/images" ]; then
+            cp ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
+            cd artifacts
+            # Rename only if a file was found
+            if [ -f *.trx ]; then
+              mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
+            else
+              echo "No .trx file found to upload."
+            fi
+          else
+            echo "Images directory not found. Build may have failed."
+          fi
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
