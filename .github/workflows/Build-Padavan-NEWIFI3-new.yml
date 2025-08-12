@@ -55,8 +55,11 @@ jobs:
           set_config CONFIG_FIRMWARE_INCLUDE_XRAY n
           set_config CONFIG_FIRMWARE_INCLUDE_TROJAN n
           
-          # FIX: Disable the msd_lite component causing the build failure
+          # FIX: Disable the msd_lite component causing a build failure
           set_config CONFIG_FIRMWARE_INCLUDE_MSD_LITE n
+
+          # FIX: Disable the e2fsprogs package causing a build failure
+          set_config CONFIG_FIRMWARE_INCLUDE_E2FSPROGS n
 
           echo "--- Firmware Configuration Complete ---"
           EOF
