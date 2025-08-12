@@ -1,0 +1,74 @@
+name: Build-Padavan-NEWIFI3-GPT5
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Cache apt packages
+      uses: actions/cache@v3
+      with:
+        path: /var/cache/apt
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/*.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y unzip libtool-bin curl cmake gperf gawk flex bison nano xxd fakeroot \
+          cpio git python3-docutils gettext automake autopoint texinfo build-essential help2man \
+          pkg-config zlib1g-dev libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget
+
+    - name: Cache toolchain
+      uses: actions/cache@v3
+      with:
+        path: /opt/rt-n56u/toolchain-mipsel
+        key: padavan-toolchain-${{ runner.os }}-${{ hashFiles('toolchain.hash') }}
+        restore-keys: |
+          padavan-toolchain-
+
+    - name: Clone source code
+      run: |
+        git clone --depth=1 https://github.com/fightroad/Padavan-KVR.git /opt/rt-n56u
+        cd /opt/rt-n56u/toolchain-mipsel
+        [ -f toolchain.md5 ] || sh dl_toolchain.sh
+        mkdir -p /opt/images
+
+    - name: Prepare config
+      env:
+        TNAME: NEWIFI3
+      run: |
+        cd /opt/rt-n56u/trunk
+        if [ ! -f configs/templates/$TNAME.config ]; then
+          echo "Config template not found"
+          exit 1
+        fi
+        cp configs/templates/$TNAME.config .config
+        # 覆盖自定义配置（建议将 custom.config 放在仓库）
+        if [ -f $GITHUB_WORKSPACE/custom.config ]; then
+          cp $GITHUB_WORKSPACE/custom.config .config
+        fi
+
+    - name: Build firmware
+      env:
+        TNAME: NEWIFI3
+      run: |
+        cd /opt/rt-n56u/trunk
+        sudo ./clear_tree
+        sudo ./build_firmware_modify $TNAME $(nproc)
+        sudo mv -f images/*.trx /opt/images/
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: Padavan-${{ github.run_id }}
+        path: /opt/images
