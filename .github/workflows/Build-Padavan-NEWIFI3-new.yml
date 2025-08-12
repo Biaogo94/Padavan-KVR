@@ -1,4 +1,4 @@
-name: Build-Padavan-NEWIFI3
+name: Build-Padavan-NEWIFI3-new
 
 on:
   workflow_dispatch:
