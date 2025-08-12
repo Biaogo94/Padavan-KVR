@@ -1,32 +1,29 @@
-name: Build-Padavan-NEWIFI3-new
+name: Build-Padavan-NEWIFI3
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # OPTIMIZATION: Use a more recent runner
+    runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
 
-    # OPTIMIZATION: Define shared environment variables at the job level
+    # 定义 job 级别的环境变量
     env:
       REPO_URL: https://github.com/fightroad/Padavan-KVR.git
-      REPO_BRANCH: master
+      REPO_BRANCH: main # <-- 已修正分支名称
       FIRMWARE_PATH: rt-n56u
       CONFIG_TARGET: NEWIFI3
       KERNEL_VERSION: 3.4
 
     steps:
       - name: Checkout repository
-        # OPTIMIZATION: Use a specific, stable version of the action
         uses: actions/checkout@v4
 
       - name: Prepare build environment
         run: |
-          # Create a directory for our build scripts if it doesn't exist
           mkdir -p .github/scripts
 
-      # OPTIMIZATION: Create a dedicated configuration script for maintainability
       - name: Create firmware configuration script
         id: create_config_script
         run: |
@@ -77,7 +74,6 @@ jobs:
           chmod +x .github/scripts/configure_firmware.sh
 
       - name: Cache toolchain and dependencies
-        # OPTIMIZATION: Cache toolchain and apt packages to speed up builds
         id: cache
         uses: actions/cache@v4
         with:
@@ -96,15 +92,12 @@ jobs:
             fakeroot cpio git python3-docutils gettext automake autopoint \
             texinfo build-essential help2man pkg-config zlib1g-dev \
             libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget
-        # Note: python-docutils is for Python 2. On ubuntu-22.04, python3-docutils is used.
 
       - name: Clone Padavan source code
         run: |
-          # OPTIMIZATION: Clone into the workspace, not /opt
           git clone --depth=1 -b $REPO_BRANCH $REPO_URL $FIRMWARE_PATH
 
       - name: Download MIPS toolchain
-        # OPTIMIZATION: Only run this if the cache was not restored
         if: steps.cache.outputs.cache-hit != 'true'
         working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
         run: |
@@ -113,38 +106,28 @@ jobs:
       - name: Build Firmware
         working-directory: ./${{ env.FIRMWARE_PATH }}/trunk
         run: |
-          # Check if template exists
           if [ ! -f "configs/templates/${CONFIG_TARGET}.config" ]; then
             echo "Error: Template configs/templates/${CONFIG_TARGET}.config not found!"
             exit 1
           fi
 
-          # Copy base template
           cp -f "configs/templates/${CONFIG_TARGET}.config" .config
           
-          # Apply customizations using our clean script
-          # The script is located in the root of the workspace
           ../../.github/scripts/configure_firmware.sh .config
 
-          # Build the firmware
-          # OPTIMIZATION: No sudo needed as we are in the workspace
           ./clear_tree
           ./build_firmware_modify $CONFIG_TARGET 0
 
       - name: Prepare artifact for upload
         run: |
-          # OPTIMIZATION: Create an artifact directory in the workspace
           mkdir -p artifacts
-          cp -f ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
+          cp ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
           cd artifacts
-          # Add build date to filename for easier identification
-          sudo mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
+          mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
 
       - name: Upload firmware artifact
-        # OPTIMIZATION: Use a specific, stable version of the action
         uses: actions/upload-artifact@v4
-        if: always() # Upload even if the build fails, for debugging
+        if: always()
         with:
           name: Padavan-Firmware-${{ env.CONFIG_TARGET }}
           path: artifacts
-
