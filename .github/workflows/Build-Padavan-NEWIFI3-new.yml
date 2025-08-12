@@ -1,4 +1,4 @@
-name: Build-Padavan-NEWIFI3
+name: Build-Padavan-NEWIFI3-new
 
 on:
   workflow_dispatch:
@@ -8,10 +8,9 @@ jobs:
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
 
-    # 定义 job 级别的环境变量
     env:
       REPO_URL: https://github.com/fightroad/Padavan-KVR.git
-      REPO_BRANCH: main # <-- 已修正分支名称
+      REPO_BRANCH: main
       FIRMWARE_PATH: rt-n56u
       CONFIG_TARGET: NEWIFI3
       KERNEL_VERSION: 3.4
@@ -25,62 +24,48 @@ jobs:
           mkdir -p .github/scripts
 
       - name: Create firmware configuration script
-        id: create_config_script
         run: |
           cat <<'EOF' > .github/scripts/configure_firmware.sh
           #!/bin/bash
-          set -e # Exit immediately if a command exits with a non-zero status.
-
+          set -e
           CONFIG_FILE="$1"
-          
-          # Function to set a config value.
-          # Usage: set_config CONFIG_KEY y/n
           set_config() {
               local KEY=$1
               local VALUE=$2
-              # If the line exists, modify it. If not, add it.
               if grep -q "^#*$KEY" "$CONFIG_FILE"; then
                   sed -i "s|^#*$KEY=.*|$KEY=$VALUE|" "$CONFIG_FILE"
               else
                   echo "$KEY=$VALUE" >> "$CONFIG_FILE"
               fi
           }
-
           echo "--- Starting Firmware Configuration ---"
-          
-          # Reset/Disable specific options from the template
           set_config CONFIG_FIRMWARE_INCLUDE_DNSFORWARDER n
           set_config CONFIG_FIRMWARE_INCLUDE_MENTOHUST n
           set_config CONFIG_FIRMWARE_INCLUDE_SCUTCLIENT n
           set_config CONFIG_FIRMWARE_INCLUDE_SRELAY n
           set_config CONFIG_FIRMWARE_INCLUDE_NJIT_CLIENT n
-
-          # Enable/Disable desired features
           set_config CONFIG_FIRMWARE_INCLUDE_OPENSSL_EXE y
           set_config CONFIG_FIRMWARE_INCLUDE_ZEROTIER y
           set_config CONFIG_FIRMWARE_INCLUDE_FRPC y
           set_config CONFIG_FIRMWARE_INCLUDE_ALIDDNS y
-          
-          # Explicitly disable other features to ensure a clean config
           set_config CONFIG_FIRMWARE_INCLUDE_TRANSMISSION n
           set_config CONFIG_FIRMWARE_INCLUDE_ARIA n
           set_config CONFIG_FIRMWARE_INCLUDE_SHADOWSOCKS n
           set_config CONFIG_FIRMWARE_INCLUDE_V2RAY n
           set_config CONFIG_FIRMWARE_INCLUDE_XRAY n
           set_config CONFIG_FIRMWARE_INCLUDE_TROJAN n
-
           echo "--- Firmware Configuration Complete ---"
           EOF
           chmod +x .github/scripts/configure_firmware.sh
 
-      - name: Cache toolchain and dependencies
-        id: cache
+      # 注意：我们不再缓存 toolchain 目录，因为它被安装到了根目录 /toolchain-3.4.x
+      # 我们只缓存 apt 包来加速
+      - name: Cache APT packages
+        id: cache-apt
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.FIRMWARE_PATH }}/toolchain-mipsel
-            /var/cache/apt/archives
-          key: ${{ runner.os }}-toolchain-${{ hashFiles('.github/scripts/configure_firmware.sh') }}
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-packages-${{ hashFiles('**/build.yml') }} # key 变动时会重新缓存
 
       - name: Install dependencies
         env:
@@ -98,10 +83,10 @@ jobs:
           git clone --depth=1 -b $REPO_BRANCH $REPO_URL $FIRMWARE_PATH
 
       - name: Download MIPS toolchain
-        if: steps.cache.outputs.cache-hit != 'true'
         working-directory: ./${{ env.FIRMWARE_PATH }}/toolchain-mipsel
         run: |
-          ./dl_toolchain.sh
+          # 修正: 必须使用 sudo 来允许脚本在根目录创建 /toolchain-3.4.x
+          sudo ./dl_toolchain.sh
 
       - name: Build Firmware
         working-directory: ./${{ env.FIRMWARE_PATH }}/trunk
@@ -110,17 +95,16 @@ jobs:
             echo "Error: Template configs/templates/${CONFIG_TARGET}.config not found!"
             exit 1
           fi
-
           cp -f "configs/templates/${CONFIG_TARGET}.config" .config
-          
           ../../.github/scripts/configure_firmware.sh .config
-
-          ./clear_tree
-          ./build_firmware_modify $CONFIG_TARGET 0
+          # 修正: 编译脚本需要 sudo 权限
+          sudo ./clear_tree
+          sudo ./build_firmware_modify $CONFIG_TARGET 0
 
       - name: Prepare artifact for upload
         run: |
           mkdir -p artifacts
+          # 文件路径现在在工作目录下的 rt-n56u/trunk/images/
           cp ./${{ env.FIRMWARE_PATH }}/trunk/images/*.trx artifacts/
           cd artifacts
           mv *.trx "Padavan_${CONFIG_TARGET}_$(date +"%Y%m%d").trx"
